@@ -1,8 +1,6 @@
 # Reqnroll
 
-[![NuGet Version](https://img.shields.io/nuget/v/Reqnroll)](https://www.nuget.org/packages/Reqnroll)
 
-[![CI](https://github.com/reqnroll/Reqnroll/actions/workflows/ci.yml/badge.svg)](https://github.com/reqnroll/Reqnroll/actions/workflows/ci.yml)
 
 Reqnroll is an open-source .NET test automation tool to practice [Behavior Driven Development (BDD)](https://cucumber.io/docs/bdd/).
 
@@ -25,19 +23,6 @@ Reqnroll works on all major operating systems (Windows, Linux, macOS), on all co
 
 The extension can be installed via NuGet packages from nuget.org. The main package you need to install depends on the test execution framework: [`Reqnroll.NUnit`](https://www.nuget.org/packages/Reqnroll.NUnit), [`Reqnroll.MsTest`](https://www.nuget.org/packages/Reqnroll.MsTest), [`Reqnroll.xUnit`](https://www.nuget.org/packages/Reqnroll.xUnit) or [`Reqnroll.TUnit`](https://www.nuget.org/packages/Reqnroll.TUnit). See detailed instructions on the [project setup documentation page](https://go.reqnroll.net/doc-setup-project).
 
-## Contributing
-
-All contributors are welcome! For more information see the [Contribution guidelines](CONTRIBUTING.md)
-
-## Sponsors
-
-* [Spec Solutions](https://www.specsolutions.eu/)
-* [Info Support](https://www.infosupport.com/)
-* [LambdaTest](https://www.lambdatest.com/)
-
-See all sponsors and information about sponsorship on the [Sponsorship page](https://reqnroll.net/sponsorship) of our website.
-
-## License
 
 Reqnroll for VisualStudio is licensed under the [BSD 3-Clause License](LICENSE).
 
