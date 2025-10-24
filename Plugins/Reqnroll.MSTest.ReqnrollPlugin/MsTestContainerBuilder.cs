@@ -1,0 +1,35 @@
+using System.Reflection;
+using Reqnroll.BoDi;
+using Reqnroll.Configuration;
+using Reqnroll.Infrastructure;
+
+namespace Reqnroll.MSTest.ReqnrollPlugin
+{
+    public class MsTestContainerBuilder : IContainerBuilder
+    {
+        private readonly IContainerBuilder _innerContainerBuilder;
+        private readonly IMsTestRuntimeAdapter _runtimeAdapter;
+
+        public MsTestContainerBuilder(IMsTestRuntimeAdapter runtimeAdapter, IContainerBuilder innerContainerBuilder = null)
+        {
+            _innerContainerBuilder = innerContainerBuilder ?? new ContainerBuilder();
+            _runtimeAdapter = runtimeAdapter;
+        }
+
+        public IObjectContainer CreateGlobalContainer(Assembly testAssembly, IRuntimeConfigurationProvider configurationProvider = null)
+        {
+            var container = _innerContainerBuilder.CreateGlobalContainer(testAssembly, configurationProvider);
+            container.RegisterInstanceAs(_runtimeAdapter);
+            _runtimeAdapter.RegisterGlobalTestContext(container);
+            return container;
+        }
+
+        public IObjectContainer CreateTestThreadContainer(IObjectContainer globalContainer) => _innerContainerBuilder.CreateTestThreadContainer(globalContainer);
+
+        public IObjectContainer CreateScenarioContainer(IObjectContainer testThreadContainer, ScenarioInfo scenarioInfo)
+            => _innerContainerBuilder.CreateScenarioContainer(testThreadContainer, scenarioInfo);
+
+        public IObjectContainer CreateFeatureContainer(IObjectContainer testThreadContainer, FeatureInfo featureInfo)
+            => _innerContainerBuilder.CreateFeatureContainer(testThreadContainer, featureInfo);
+    }
+}

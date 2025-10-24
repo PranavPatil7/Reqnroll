@@ -1,0 +1,571 @@
+name: CI
+
+on:
+  push:
+    branches: 
+      - 'main'
+    paths-ignore:
+      - README.md
+      - CHANGELOG.md
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      deploy_packages:
+        description: 'deploy_packages: If the created package should be deployed (additional manual approval required by a release admin)'
+        type: boolean
+        default: false
+        required: true
+      is_production_release:
+        description: 'is_production_release: Whether the release is a production release and not a pre-releaae (enabling this will update change log, increases version and tags commit)'
+        type: boolean
+        default: false
+        required: true
+      custom_version_suffix:
+          description: 'custom_version_suffix: Custom suffix for the NuGet packages (without leading -) for non-production releases. Default: empty for production release, "ci<DATE>" for other runs. The build ID is always appended.'
+          required: false
+      custom_configuration:
+        description: 'custom_configuration: Custom build configuration. Default: "Debug" for CI builds, "Release" for deployments.'
+        required: false
+        default: 'Default'
+        type: choice
+        options:
+        - Default
+        - Debug
+        - Release
+      specs_filter:
+        description: 'specs_filter: Filter for Specs execution (e.g. Category=basicExecution)'
+        required: false
+
+permissions:
+  checks: write
+
+env:
+  SPECS_FILTER: "" # use for testing CI: "&Category=basicExecution"
+  REQNROLL_TEST_PIPELINEMODE: true
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    outputs:
+      product_version_prefix: ${{ steps.versions.outputs.product_version_prefix }}
+      product_version_suffix: ${{ steps.versions.outputs.product_version_suffix }}
+      product_main_version: ${{ steps.versions.outputs.product_main_version }}
+      product_patch_version: ${{ steps.versions.outputs.product_patch_version }}
+      product_full_version: ${{ steps.versions.outputs.product_full_version }}
+      product_configuration: ${{ steps.versions.outputs.product_configuration }}
+      deploy_packages: ${{ steps.versions.outputs.deploy_packages }}
+      is_production_release: ${{ steps.versions.outputs.is_production_release }}
+
+      build_params: ${{ steps.build_params.outputs.build_params }}
+      test_params: ${{ steps.build_params.outputs.test_params }}
+      specs_filter: ${{ steps.build_params.outputs.specs_filter }}
+
+    steps:
+    - uses: actions/checkout@v4
+    - id: versions
+      name: Calculate versions
+      shell: pwsh
+      run: |
+        $deployPackages = $false
+        if ("${{ inputs.deploy_packages }}" -eq 'true') {
+          $deployPackages = $true
+        }
+        Write-Output "deploy_packages=$($deployPackages.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT        
+        Write-Output "Deploy packages: $deployPackages"
+
+        $isProductionRelease = $false
+        if ("${{ inputs.is_production_release }}" -eq 'true') {
+          $isProductionRelease = $true
+        }
+        Write-Output "is_production_release=$($isProductionRelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT       
+        Write-Output "Is production release: $isProductionRelease" 
+
+        $versionSuffix = "${{ inputs.custom_version_suffix }}"
+        if ($isProductionRelease){
+          if ($versionSuffix -ne "") {
+            throw "The 'custom_version_suffix' setting cannot be used for production releases."
+          }
+        }
+        else {
+          if ($versionSuffix -eq "") {
+            $date = [datetime]::Today
+            $dateString = $date.ToString('yyyyMMdd')
+            $versionSuffix = "ci$dateString-${env:GITHUB_RUN_NUMBER}"
+          }
+          else {
+            $versionSuffix = "$versionSuffix-${env:GITHUB_RUN_NUMBER}"
+          }
+        }
+        Write-Output "product_version_suffix=$versionSuffix" >> $env:GITHUB_OUTPUT
+        Write-Output "Product Version Suffix: $versionSuffix"
+        
+        $productConfig = "${{ inputs.custom_configuration }}"
+        if (($productConfig -eq "Default") -or ($productConfig -eq "")) {
+          if ($deployPackages){
+            $productConfig = "Release"
+          }
+          else {
+            $productConfig = "Debug"
+          }
+        }
+        Write-Output "product_configuration=$productConfig" >> $env:GITHUB_OUTPUT
+        Write-Output "Product Configuration: $productConfig"
+
+        $buildPropsXml = [xml](Get-Content Directory.Build.props)
+        $versionPrefix = $buildPropsXml.SelectSingleNode('//Project/PropertyGroup/VersionPrefix/text()').Value.Trim()
+        Write-Output "product_version_prefix=$versionPrefix" >> $env:GITHUB_OUTPUT
+        Write-Output "Product Version Prefix: $versionPrefix"
+
+        $mainVersion = &{$versionPrefix -match '^\d+\.\d+' > $null; $matches[0]}
+        Write-Output "product_main_version=$mainVersion" >> $env:GITHUB_OUTPUT
+        Write-Output "Product Main Version: $mainVersion"
+
+        $patchVersion = &{$versionPrefix -match '\d+$' > $null; $matches[0]}
+        Write-Output "product_patch_version=$patchVersion" >> $env:GITHUB_OUTPUT
+        Write-Output "Product Patch Version: $patchVersion"
+
+        $fullVersion = $versionPrefix
+        if ($versionSuffix -ne "") {
+            $fullVersion = "$fullVersion-$versionSuffix"
+        }
+        Write-Output "product_full_version=$fullVersion" >> $env:GITHUB_OUTPUT
+        Write-Output "Product Full Version: $fullVersion"
+    - id: build_params
+      name: Calculate build parameters
+      shell: pwsh
+      env:
+        APPINSIGHTS_KEY: ${{ secrets.APPINSIGHTS_KEY }}      
+      run: |
+        # Load version fields to variables
+        $versionSuffix = '${{ steps.versions.outputs.product_version_suffix }}'
+        $productConfig = '${{ steps.versions.outputs.product_configuration }}'
+        $deployPackages = '${{ steps.versions.outputs.deploy_packages }}' -eq 'true'
+
+        # Calculate 'build_params'
+        $buildParams = "-p:VersionSuffix=$versionSuffix -c $productConfig"
+        Write-Output "build_params=$buildParams" >> $env:GITHUB_OUTPUT
+        Write-Output "Build Params: $buildParams"
+
+        # Calculate 'main_build_params'
+        $mainBuildParams = $buildParams
+        if ($deployPackages) {
+          $mainBuildParams = "$mainBuildParams -p:AppInsightsInstrumentationKey=$env:APPINSIGHTS_KEY"
+          Write-Output "Main Build Params Updated for Deployment"
+        }
+        Write-Output "main_build_params=$mainBuildParams" >> $env:GITHUB_OUTPUT
+
+        # Calculate 'test_params'
+        $gitHubActionsLoggerSettings = '"GitHubActions;summary.includePassedTests=true;summary.includeSkippedTests=true;annotations.titleFormat=[@traits.Category] @test;annotations.messageFormat=@error\n@trace"'
+        $testParams = "--no-restore --verbosity minimal --logger $gitHubActionsLoggerSettings -- RunConfiguration.CollectSourceInformation=true RunConfiguration.TreatNoTestsAsError=true"
+        Write-Output "test_params=$testParams" >> $env:GITHUB_OUTPUT
+        Write-Output "Test Params: $testParams"
+
+        # Calculate 'specs_filter'
+        $specsFilter = "${{ inputs.specs_filter }}"
+        if ($specsFilter -ne "") {
+            $specsFilter = "&$specsFilter"
+        }
+        else {
+            $specsFilter = $env:SPECS_FILTER
+        }
+        Write-Output "specs_filter=$specsFilter" >> $env:GITHUB_OUTPUT
+        Write-Output "Specs Filter: $specsFilter"
+
+    - name: Update Changelog
+      shell: pwsh
+      run: |
+        $releaseDate = [System.DateTime]::Today.ToString("yyyy-MM-dd")
+        $newHeading = "# v${{ steps.versions.outputs.product_full_version }} - $releaseDate"
+        $content = [System.IO.File]::ReadAllText("CHANGELOG.md").Replace("# [vNext]",$newHeading)
+        [System.IO.File]::WriteAllText("CHANGELOG.md", $content)
+    - name: Restore dependencies
+      run: dotnet restore
+    - name: Build
+      run: dotnet build --no-restore ${{ steps.build_params.outputs.main_build_params }}
+    - name: Runtime Tests
+      run: dotnet test ./Tests/Reqnroll.RuntimeTests/Reqnroll.RuntimeTests.csproj --logger "trx;LogFileName=${{ github.workspace }}/TestResults/runtimetests-results.trx" ${{ steps.build_params.outputs.test_params }}
+    - name: Generator Tests
+      run: dotnet test ./Tests/Reqnroll.GeneratorTests/Reqnroll.GeneratorTests.csproj --logger "trx;LogFileName=${{ github.workspace }}/TestResults/generatortests-results.trx" ${{ steps.build_params.outputs.test_params }}
+    - name: Plugin Tests
+      run: dotnet test ./Tests/Reqnroll.PluginTests/Reqnroll.PluginTests.csproj --logger "trx;LogFileName=${{ github.workspace }}/TestResults/plugintests-results.trx" ${{ steps.build_params.outputs.test_params }}
+    - name: TestProjectGenerator Tests
+      run: dotnet test ./Tests/TestProjectGenerator/Reqnroll.TestProjectGenerator.Tests/Reqnroll.TestProjectGenerator.Tests.csproj --logger "trx;LogFileName=${{ github.workspace }}/TestResults/testprjgentests-results.trx" ${{ steps.build_params.outputs.test_params }}
+    - name: Upload TRX files
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: build-trx-v${{ steps.versions.outputs.product_full_version }}
+        if-no-files-found: error
+        path: "TestResults/*.trx"
+    - name: Upload packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: packages-v${{ steps.versions.outputs.product_full_version }}
+        if-no-files-found: error
+        path: "GeneratedNuGetPackages/${{ steps.versions.outputs.product_configuration }}/*.*nupkg"
+    - name: Upload SystemTests
+      uses: actions/upload-artifact@v4
+      with:
+        name: SystemTests
+        if-no-files-found: error
+        path: Tests/Reqnroll.SystemTests/bin/
+    - name: Upload Specs
+      uses: actions/upload-artifact@v4
+      with:
+        name: Specs
+        if-no-files-found: error
+        path: Tests/Reqnroll.Specs/bin/
+    - name: Upload Formatters Tests
+      uses: actions/upload-artifact@v4
+      with:
+        name: Formatters
+        if-no-files-found: error
+        path: Tests/Reqnroll.Formatters.Tests/bin/
+
+  validate-packages:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Download packages
+      uses: actions/download-artifact@v4
+      with:
+        name: packages-v${{ needs.build.outputs.product_full_version }}
+        path: GeneratedNuGetPackages/${{ needs.build.outputs.product_configuration }}/
+    - name: Install NuGet Package Validation Tool
+      run: dotnet tool install --global Meziantou.Framework.NuGetPackageValidation.Tool
+    - name: Validate NuGet packages
+      shell: pwsh
+      run: |
+        Write-Output "Validating NuGet packages..."
+        $packages = Get-ChildItem "GeneratedNuGetPackages/${{ needs.build.outputs.product_configuration }}/*.nupkg" -Exclude "*.snupkg"
+        $errorCount = 0
+        $totalPackages = $packages.Count
+        
+        # Determine excluded rules based on branch
+        $excludedRules = @()
+        if ("${{ github.ref }}" -ne "refs/heads/main") {
+          $excludedRules += "AssembliesMustBeOptimized"
+          Write-Output "::notice::Assembly optimization validation skipped for non-main branch"
+        }
+        
+        foreach ($package in $packages) {
+          Write-Output "Validating package: $($package.Name)"
+          try {
+            # Build validation command with conditional exclusions
+            $validationArgs = @($package.FullName)
+            if ($excludedRules.Count -gt 0) {
+              $validationArgs += "--excluded-rules"
+              $validationArgs += ($excludedRules -join ",")
+            }
+            
+            # Run validation
+            $validationResult = & meziantou.validate-nuget-package @validationArgs
+            $exitCode = $LASTEXITCODE
+            
+            if ($exitCode -eq 0) {
+              Write-Output "✅ $($package.Name) passed validation"
+            } else {
+              Write-Output "::warning title=Package Validation Issues::$($package.Name) has validation issues"
+              Write-Output $validationResult
+              # For now, we'll log warnings but not fail the build to allow gradual improvement
+              # This can be changed to fail the build once all validation issues are resolved
+              Write-Output "::notice::Package validation issues detected but not failing build (gradual improvement mode)"
+            }
+          } catch {
+            Write-Output "::error title=Package Validation Error::Error validating $($package.Name): $_"
+            $errorCount++
+          }
+        }
+        
+        if ($errorCount -gt 0) {
+          Write-Output "::error title=Package Validation Failed::$errorCount package(s) had validation errors"
+          exit 1
+        } else {
+          Write-Output "✅ Validation completed for $totalPackages packages"
+          exit 0
+        }
+
+  specs:
+    runs-on: ubuntu-latest
+    needs: build
+    env:
+      # Disable telemetry, because we use many small projects
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      REQNROLL_TELEMETRY_ENABLED: 0
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set Runner ImageVersion to Env
+      shell: pwsh
+      run: |
+        Write-Output "ImageVersion=$env:ImageVersion" >> $env:GITHUB_ENV
+    - name: Cache RRC folder
+      uses: actions/cache@v4
+      with:
+        path: /tmp/RRC
+        key: RRC-Specs-${{ runner.os }}-${{ env.ImageVersion }} # Use the runner version as key, so if new dependencies get installed we get a new cache entry
+    - name: Download packages
+      uses: actions/download-artifact@v4
+      with:
+        name: packages-v${{ needs.build.outputs.product_full_version }}
+        path: GeneratedNuGetPackages/${{ needs.build.outputs.product_configuration }}/
+    - name: Download Specs
+      uses: actions/download-artifact@v4
+      with:
+        name: Specs
+        path: Tests/Reqnroll.Specs/bin/
+    - name: Specs
+      shell: pwsh
+      run: dotnet test ./Tests/Reqnroll.Specs/bin/${{ needs.build.outputs.product_configuration }}/*/Reqnroll.Specs.dll --filter "Category!=quarantaine{{ needs.build.outputs.specs_filter }}" --logger "trx;LogFileName=${{ github.workspace }}/TestResults/specs-results.trx" ${{ needs.build.outputs.test_params }}
+    - name: Upload TRX files
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: specs-trx-v${{ needs.build.outputs.product_full_version }}
+        if-no-files-found: error
+        path: "TestResults/specs-results.trx"
+
+  system-tests-windows:
+    runs-on: windows-latest
+    needs: build
+    env:
+      # D:\ (temporary) drive has better performance then C:\ (remote) drive on the Github Runner, so place all temporary files on D:\, see https://github.com/actions/setup-dotnet/issues/260
+      DOTNET_INSTALL_DIR: D:\dotnet
+      REQNROLL_TEST_TEMPFOLDER: D:\testrundata
+      NUGET_PACKAGES: D:\nuget\packages
+      # Disable telemetry, because we use many small projects
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      REQNROLL_TELEMETRY_ENABLED: 0
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set Runner ImageVersion and Week number to Env
+      shell: pwsh
+      run: |
+        Write-Output "ImageVersion=$env:ImageVersion" >> $env:GITHUB_ENV
+        $WeekNumber = Get-Date -UFormat %V
+        Write-Output "WeekNumber=$WeekNumber" >> $env:GITHUB_ENV
+    - name: Cache Reqnroll Resource Cache (RRC) folder
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.REQNROLL_TEST_TEMPFOLDER }}/RRC
+        # Use the runner version in the key, so if new dependencies get installed we get a new cache entry
+        # Also add week number so that if new tests require new cached templates they should eventually get into the RRC
+        key: RRC-SystemTests-${{ runner.os }}-${{ env.ImageVersion }}-W${{ env.WeekNumber }}
+    - name: Download packages
+      uses: actions/download-artifact@v4
+      with:
+        name: packages-v${{ needs.build.outputs.product_full_version }}
+        path: GeneratedNuGetPackages/${{ needs.build.outputs.product_configuration }}/
+    - name: Download SystemTests
+      uses: actions/download-artifact@v4
+      with:
+        name: SystemTests
+        path: Tests/Reqnroll.SystemTests/bin/
+    - name: Download Formatters Tests
+      uses: actions/download-artifact@v4
+      with:
+        name: Formatters
+        path: Tests/Reqnroll.Formatters.Tests/bin/
+    - name: Setup required .NET SDKs
+      # It is faster to install all required .NET versions to D: drive than installing only the missing one to C: drive and use it from there.
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: | 
+          8.0.x
+          9.0.x
+    - name: .NET Information
+      run: |
+        dotnet --list-sdks
+        dotnet --list-runtimes
+    - name: System Tests
+      shell: pwsh
+      run: dotnet test ./Tests/Reqnroll.SystemTests/bin/${{ needs.build.outputs.product_configuration }}/*/Reqnroll.SystemTests.dll --logger "trx;LogFileName=${{ github.workspace }}/TestResults/systemtests-windows-results.trx" ${{ needs.build.outputs.test_params }}
+    - name: Formatters Tests
+      shell: pwsh
+      run: dotnet test ./Tests/Reqnroll.Formatters.Tests/bin/${{ needs.build.outputs.product_configuration }}/*/Reqnroll.Formatters.Tests.dll --logger "console;verbosity=detailed" --logger "trx;LogFileName=${{ github.workspace }}/TestResults/Formatterstests-windows-results.trx" ${{ needs.build.outputs.test_params }} 
+    - name: Upload Test Result TRX Files
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: systemtests-windows-trx-v${{ needs.build.outputs.product_full_version }}
+        if-no-files-found: error
+        path: "TestResults/*.trx"
+
+
+  system-tests-linux:
+    runs-on: ubuntu-latest
+    needs: build
+    env:
+      # Disable telemetry, because we use many small projects
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      REQNROLL_TELEMETRY_ENABLED: 0
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set Runner ImageVersion and Week number to Env
+      shell: pwsh
+      run: |
+        Write-Output "ImageVersion=$env:ImageVersion" >> $env:GITHUB_ENV
+        $WeekNumber = Get-Date -UFormat %V
+        Write-Output "WeekNumber=$WeekNumber" >> $env:GITHUB_ENV
+    - name: Cache Reqnroll Resource Cache (RRC) folder
+      uses: actions/cache@v4
+      with:
+        path: /tmp/RRC
+        # Use the runner version in the key, so if new dependencies get installed we get a new cache entry
+        # Also add week number so that if new tests require new cached templates they should eventually get into the RRC
+        key: RRC-SystemTests-${{ runner.os }}-${{ env.ImageVersion }}-W${{ env.WeekNumber }}
+    - name: Download packages
+      uses: actions/download-artifact@v4
+      with:
+        name: packages-v${{ needs.build.outputs.product_full_version }}
+        path: GeneratedNuGetPackages/${{ needs.build.outputs.product_configuration }}/
+    - name: Download SystemTests
+      uses: actions/download-artifact@v4
+      with:
+        name: SystemTests
+        path: Tests/Reqnroll.SystemTests/bin/
+    - name: Download Formatters Tests
+      uses: actions/download-artifact@v4
+      with:
+        name: Formatters
+        path: Tests/Reqnroll.Formatters.Tests/bin/
+    - name: Setup required .NET SDKs
+      # The default image contains .NET 8 only, but reusing it would not provide much performance benefit
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: | 
+          8.0.x
+          9.0.x
+    - name: .NET Information
+      run: |
+        dotnet --list-sdks
+        dotnet --list-runtimes
+    - name: System Tests
+      shell: pwsh
+      run: dotnet test ./Tests/Reqnroll.SystemTests/bin/${{ needs.build.outputs.product_configuration }}/*/Reqnroll.SystemTests.dll --filter "TestCategory!=MsBuild&TestCategory!=NetFramework" --logger "trx;LogFileName=${{ github.workspace }}/TestResults/systemtests-linux-results.trx" ${{ needs.build.outputs.test_params }}
+    - name: Formatters Tests
+      shell: pwsh
+      run: dotnet test ./Tests/Reqnroll.Formatters.Tests/bin/${{ needs.build.outputs.product_configuration }}/*/Reqnroll.Formatters.Tests.dll --filter "TestCategory!=MsBuild&TestCategory!=NetFramework" --logger "trx;LogFileName=${{ github.workspace }}/TestResults/Formatterstests-linux-results.trx" ${{ needs.build.outputs.test_params }} 
+    - name: Upload Test Result TRX Files
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: systemtests-linux-trx-v${{ needs.build.outputs.product_full_version }}
+        if-no-files-found: error
+        path: "TestResults/*.trx"
+    
+  build-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Doc Dependencies
+      working-directory: docs
+      run: | 
+        pip install -r requirements.txt
+    - name: Build Doc
+      working-directory: docs
+      run: |
+        sphinx-build -M html . _build --fail-on-warning
+    - name: Upload HTML Doc Files
+      uses: actions/upload-artifact@v4
+      with:
+        name: html-docs
+        if-no-files-found: error
+        path: "docs/_build/html/**/*"
+    
+  release:
+    runs-on: ubuntu-latest
+    needs: [build, validate-packages, specs, system-tests-windows, system-tests-linux]
+    environment: production_environment
+    if: github.ref == 'refs/heads/main' && needs.build.outputs.deploy_packages == 'true'
+    permissions:
+      # Give the default GITHUB_TOKEN write permission to commit and push the
+      # added or changed files to the repository.
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # avoid shallow clone git commit
+        ref: ${{ github.head_ref }}
+        ssh-key: ${{secrets.RELEASE_GIT_SSH_KEY}}
+    - uses: actions/download-artifact@v4
+      with:
+        name: packages-v${{ needs.build.outputs.product_full_version }}
+        path: release_packages
+    - name: Deploy NuGet packages
+      env:
+        NUGET_PUBLISH_KEY: ${{ secrets.NUGET_PUBLISH_KEY }}      
+      shell: pwsh
+      run: |
+        Write-Output "Deploying v${{ needs.build.outputs.product_full_version }} (v${{ needs.build.outputs.product_main_version }}) packages to nuget.org"
+        ls ${{ github.workspace }}/release_packages
+        ${{ github.workspace }}/.github/workflows/publish_packages.ps1 -packagesDir ${{ github.workspace }}/release_packages
+
+    - name: Calculate Next Version
+      if: needs.build.outputs.is_production_release == 'true'
+      id: next_version
+      shell: pwsh
+      run: |
+        $patchVersion = "${{ needs.build.outputs.product_patch_version }}"
+        $nextPatch = [int]$patchVersion + 1
+        $nextVersion = "${{ needs.build.outputs.product_main_version }}.$nextPatch"
+        Write-Output "product_next_version=$nextVersion" >> $env:GITHUB_OUTPUT
+        Write-Output "Product Next Version: $nextVersion"
+
+    - name: Bump Version
+      if: needs.build.outputs.is_production_release == 'true'
+      shell: pwsh
+      run: |
+        [System.IO.File]::WriteAllText("Directory.Build.props", [System.IO.File]::ReadAllText("Directory.Build.props").Replace("<VersionPrefix>${{ needs.build.outputs.product_version_prefix }}</VersionPrefix>", "<VersionPrefix>${{ steps.next_version.outputs.product_next_version }}</VersionPrefix>"))
+
+    - name: Update Changelog
+      if: needs.build.outputs.is_production_release == 'true'
+      id: changelog
+      shell: pwsh
+      run: |
+        $newHeading = "# [vNext]$([Environment]::NewLine)$([Environment]::NewLine)## Improvements:$([Environment]::NewLine)$([Environment]::NewLine)## Bug fixes:$([Environment]::NewLine)$([Environment]::NewLine)*Contributors of this release (in alphabetical order):* $([Environment]::NewLine)$([Environment]::NewLine)"
+        $releaseDate = [System.DateTime]::Today.ToString("yyyy-MM-dd")
+        $releaseTitle = "v${{ needs.build.outputs.product_full_version }} - $releaseDate"
+        $newHeading = $newHeading + "# $releaseTitle"
+        $content = [System.IO.File]::ReadAllText("CHANGELOG.md").Replace("# [vNext]",$newHeading)
+        [System.IO.File]::WriteAllText("CHANGELOG.md", $content)
+        Write-Output "New Heading:"
+        Write-Output $newHeading
+
+        # calculate release notes
+        $match = [System.Text.RegularExpressions.Regex]::Match($content, "(?ms)^# .*?^# (?<title>[^\r\n]*?)\s*$\s*(?<notes>.*?)\s*(?:^# |\Z)")
+        $releaseNotes =  $(if ($match.Success) { $match.Groups["notes"].Value } else { "N/A" })
+        [System.IO.File]::WriteAllText("release_notes.txt", $releaseNotes)
+        Write-Output "release_title=$releaseTitle" >> $env:GITHUB_OUTPUT
+        Write-Output "release_notes_file=release_notes.txt" >> $env:GITHUB_OUTPUT
+
+    - name: Update changes in GitHub repository
+      if: needs.build.outputs.is_production_release == 'true'
+      run: |
+        git status
+        git config --global user.name 'Reqnroll CI' 
+        git config --global user.email 'ci@reqnroll.net'
+        git tag v${{ needs.build.outputs.product_full_version }}
+        git push origin tag v${{ needs.build.outputs.product_full_version }}
+        git add -u
+        git commit -m '[automated commit] bump version after release of ${{ needs.build.outputs.product_full_version }}'
+        git push
+
+    - name: Create GitHub Release
+      if: needs.build.outputs.is_production_release == 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+          gh release create "v${{ needs.build.outputs.product_full_version }}" \
+              --verify-tag \
+              --title="${{ steps.changelog.outputs.release_title }}" \
+              --notes-file="${{ steps.changelog.outputs.release_notes_file }}"

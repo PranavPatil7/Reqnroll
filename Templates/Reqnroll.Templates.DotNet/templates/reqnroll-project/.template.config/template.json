@@ -1,0 +1,143 @@
+{
+    "$schema": "http://json.schemastore.org/template",
+    "author": "Reqnroll",
+    "classifications": ["Reqnroll", "Project"],
+    "identity": "ReqnrollTemplates.DotNET.Project",
+    "name": "Reqnroll Project Template",
+    "shortName": "reqnroll-project",
+    "tags": {
+        "language": "C#",
+        "type": "project"
+    },
+    "sourceName": "Template",
+    "symbols": {
+        "targetFramework": {
+            "type": "parameter",
+            "description": "Target Framework",
+            "datatype": "choice",
+            "defaultValue": "net8.0",
+            "replaces": "$target$",
+            "choices": [
+                {
+                    "choice": "net8.0",
+                    "description": ".NET 8.0"
+                },
+                {
+                    "choice": "net9.0",
+                    "description": ".NET 9.0"
+                },
+                {
+                    "choice": "net462",
+                    "description": ".NET Framework 4.6.2"
+                },
+                {
+                    "choice": "net472",
+                    "description": ".NET Framework 4.7.2"
+                },
+                {
+                    "choice": "net481",
+                    "description": ".NET Framework 4.8.1"
+                }
+            ]
+        },
+        "testExecutionFramework": {
+            "type": "parameter",
+            "description": "Test Execution Framework",
+            "datatype": "choice",
+            "defaultValue": "nunit",
+            "choices": [
+                {
+                    "choice": "xunit",
+                    "description": "xUnit"
+                },
+                {
+                    "choice": "nunit",
+                    "description": "NUnit"
+                },
+                {
+                    "choice": "mstest",
+                    "description": "MSTest"
+                },
+                {
+                    "choice": "tunit",
+                    "description": "TUnit"
+                }
+            ]
+        },
+        "includeFluentAssertions": {
+            "type": "parameter",
+            "datatype": "bool",
+            "description": "Add FluentAssertions library",
+            "defaultValue": "true"
+        },
+        "ReqnrollNugetPackages": {
+            "type": "generated",
+            "generator": "switch",
+            "replaces": "$ReqnrollNugetPackages$",
+            "parameters": {
+                "evaluator": "C++",
+                "datatype": "string",
+                "cases": [
+                    {
+                        "condition": "(testExecutionFramework == 'xunit')",
+                        "value": "<PackageReference Include=\"Reqnroll.xUnit\" Version=\"$$$NuGetPackageVersion$$$\" />"
+                    },
+                    {
+                        "condition": "(testExecutionFramework == 'mstest')",
+                        "value": "<PackageReference Include=\"Reqnroll.MsTest\" Version=\"$$$NuGetPackageVersion$$$\" />"
+                    },
+                    {
+                        "condition": "(testExecutionFramework == 'nunit')",
+                        "value": "<PackageReference Include=\"Reqnroll.NUnit\" Version=\"$$$NuGetPackageVersion$$$\" />"
+                    },
+                    {
+                        "condition": "(testExecutionFramework == 'tunit')",
+                        "value": "<PackageReference Include=\"Reqnroll.TUnit\" Version=\"$$$NuGetPackageVersion$$$\" />"
+                    }
+                ]
+            }
+        },
+        "AdditionalNugetPackages": {
+            "type": "generated",
+            "generator": "switch",
+            "replaces": "$additionalNugetPackages$",
+            "parameters": {
+                "evaluator": "C++",
+                "datatype": "string",
+                "cases": [
+                    {
+                        "condition": "(testExecutionFramework == 'xunit')",
+                        "value": "<PackageReference Include=\"xunit\" Version=\"2.6.6\" />\n    <PackageReference Include=\"xunit.runner.visualstudio\" Version=\"2.5.6\">\n    <PrivateAssets>all</PrivateAssets>\n        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>\n    </PackageReference>"
+                    },
+                    {
+                        "condition": "(testExecutionFramework == 'mstest')",
+                        "value": "<PackageReference Include=\"MSTest.TestFramework\" Version=\"3.1.1\" />\n    <PackageReference Include=\"MSTest.TestAdapter\" Version=\"3.1.1\" />"
+                    },
+                    {
+                        "condition": "(testExecutionFramework == 'nunit')",
+                        "value": "<PackageReference Include=\"nunit\" Version=\"4.0.1\" />\n    <PackageReference Include=\"NUnit3TestAdapter\" Version=\"4.5.0\" />"
+                    },
+                    {
+                        "condition": "(testExecutionFramework == 'tunit')",
+                        "value": "<PackageReference Include=\"TUnit\" Version=\"0.25.21\" />"
+                    }
+                ]
+            }
+        },
+        "FluentAssertionsNugetPackage": {
+            "type": "generated",
+            "generator": "switch",
+            "replaces": "$fluentAssertionsNugetPackage$",
+            "parameters": {
+                "evaluator": "C++",
+                "datatype": "string",
+                "cases": [
+                    {
+                        "condition": "(includeFluentAssertions)",
+                        "value": "<PackageReference Include=\"FluentAssertions\" Version=\"6.12.0\" />"
+                    }
+                ]
+            }
+        }
+    }
+}

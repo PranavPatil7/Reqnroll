@@ -1,0 +1,70 @@
+---
+name: Bug report
+description: Create a report to help us improve Reqnroll
+labels: [bug]
+body:
+- type: input
+  attributes:
+    label: Reqnroll Version
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Which test runner are you using?
+    options: 
+      - MSTest 
+      - NUnit
+      - xUnit 2
+      - xUnit 3
+  validations:
+    required: true
+- type: input
+  attributes:
+    label: Test Runner Version Number
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: .NET Implementation
+    options:
+      - .NET 9.0
+      - .NET 8.0
+      - .NET 7.0 (not supported)
+      - .NET 6.0 (not supported)
+      - .NET 5.0 (not supported)
+      - .NET Core 3.1 (not supported)
+      - .NET Framework 4.6.2 or later
+  validations:
+    required: true
+- type: dropdown
+  attributes:
+    label: Test Execution Method
+    options:
+      - Visual Studio Test Explorer
+      - ReSharper Test Runner
+      - Azure DevOps Pipeline Task – PLEASE SPECIFY THE NAME OF THE TASK
+      - Other build server task – PLEASE SPECIFY THE NAME OF THE BUILD SERVER AND TASK
+      - Command line – PLEASE SPECIFY THE FULL COMMAND LINE
+      - Other – PLEASE SPECIFY
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: Content of reqnroll.json configuration file
+    placeholder: PLEASE COPY THE ENTIRE reqnroll.json
+- type: textarea
+  attributes:
+    label: Issue Description
+    placeholder: For ideas, feature requests and questions, please use our discussion board at https://github.com/reqnroll/Reqnroll/discussions/
+  validations:
+    required: true
+- type: textarea
+  attributes:
+    label: Steps to Reproduce
+  validations:
+    required: true
+- type: input
+  attributes:
+    label: Link to Repro Project
+  validations:
+    required: false

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>$target$</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    $ReqnrollNugetPackages$
+    $additionalNugetPackages$
+    $fluentAssertionsNugetPackage$
+  </ItemGroup>
+
+</Project>

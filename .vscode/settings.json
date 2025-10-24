@@ -1,0 +1,15 @@
+{
+    "github.upstream": "reqnroll/Reqnroll",
+    "restructuredtext.confPath": "${workspaceFolder}\\docs\\source",
+    "markdownlint.config": {
+        "MD028": false,
+        "MD025": {
+            "front_matter_title": ""
+        }
+    },
+    "cSpell.words": [
+        "Quickstart",
+        "Reqnroll"
+    ],
+    "markdown.extension.toc.updateOnSave": false
+}
